@@ -1,0 +1,59 @@
+name: Build macOS Intel (x86_64)
+
+on:
+  push:
+    branches:
+      - x86_64-apple-darwin
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build x86_64-apple-darwin version
+    runs-on: macos-15-intel
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get version
+        id: version
+        run: |
+          version=$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)
+          if [[ -z "$version" ]]; then
+            echo "Error: could not parse version from crates/cli/Cargo.toml" >&2
+            exit 1
+          fi
+          echo "tag=v${version}" >> $GITHUB_OUTPUT
+
+      - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: x86_64-apple-darwin
+
+      - name: Build release binaries
+        run: cargo build --release -p moon_cli
+
+      - name: Create archive
+        run: |
+          mkdir moon_cli-x86_64-apple-darwin
+          cp target/release/moon target/release/moonx moon_cli-x86_64-apple-darwin/
+          tar -cJf moon_cli-x86_64-apple-darwin.tar.xz moon_cli-x86_64-apple-darwin/
+          shasum -a 256 moon_cli-x86_64-apple-darwin.tar.xz > moon_cli-x86_64-apple-darwin.tar.xz.sha256
+
+      - name: Upload to GitHub Release
+        run: |
+          tag="${{ steps.version.outputs.tag }}-x64"
+          if gh release view "$tag" &>/dev/null; then
+            gh release upload "$tag" moon_cli-x86_64-apple-darwin.tar.xz moon_cli-x86_64-apple-darwin.tar.xz.sha256 --clobber
+          else
+            gh release create "$tag" moon_cli-x86_64-apple-darwin.tar.xz moon_cli-x86_64-apple-darwin.tar.xz.sha256 \
+              --title "$tag" \
+              --notes "macOS Intel (x86_64) binary for moon ${{ steps.version.outputs.tag }}"
+          fi
